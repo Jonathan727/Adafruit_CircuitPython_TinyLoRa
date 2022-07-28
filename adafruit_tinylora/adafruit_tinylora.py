@@ -37,9 +37,11 @@ __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_TinyLoRa.git"
 
 # RFM Module Settings
+US_PREAMBLE_SYNC_WORD = 0x34
 _MODE_SLEEP = const(0b0_00_0_0_000)
 _MODE_LORA = const(0b1_00_0_0_000)
 _MODE_STANDBY = const(0b0_00_0_0_001)
+_MODE_LORA_STANDBY = const(0b1_00_0_0_001)
 _MODE_TX = const(0b1_00_0_0_011)
 # RFM Registers
 _REG_PA_CONFIG = const(0x09)
@@ -195,7 +197,7 @@ class TinyLoRa:
                 (_REG_PREAMBLE_MSB, 0x00),
                 (_REG_PREAMBLE_LSB, 0x08),
                 (_REG_MODEM_CONFIG_3, 0x0C),
-                (_REG_SYNC_WORD, 0x34),
+                (_REG_SYNC_WORD, US_PREAMBLE_SYNC_WORD),
                 (_REG_INVERT_LORA_I_AND_Q_SIGNALS, 0x27),
                 (_REG_INVERT_LORA_I_AND_Q_SIGNALS_2, 0x1D),
                 (_REG_FIFO_TX_BASE_ADDRESS, 0x80),
@@ -277,9 +279,10 @@ class TinyLoRa:
         :param int timeout: TxDone wait time.
         """
         # Set RFM to standby
-        self._write_u8(_MODE_STANDBY, 0x81)
+        self._write_u8(_REG_OPERATING_MODE, _MODE_LORA_STANDBY)
         # wait for RFM to enter standby mode
         time.sleep(0.01)
+        # TODO: not sure about this next setting 0x40 is _REG_DIO_MAPPING_1 maybe this sets the bitrate?
         # switch interrupt to txdone
         self._write_u8(0x40, 0x40)
         # check for multi-channel configuration
