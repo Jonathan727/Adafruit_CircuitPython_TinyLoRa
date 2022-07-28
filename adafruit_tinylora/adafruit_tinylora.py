@@ -188,8 +188,10 @@ class TinyLoRa:
         for pair in (
                 (_REG_OPERATING_MODE, _MODE_SLEEP),
                 (_REG_OPERATING_MODE, _MODE_LORA),
+                #     Max Power
                 (_REG_PA_CONFIG, 0xFF),
                 (_REG_SYMBOL_TIMEOUT_LSB, 0x25),
+                #     Preamble Length
                 (_REG_PREAMBLE_MSB, 0x00),
                 (_REG_PREAMBLE_LSB, 0x08),
                 (_REG_MODEM_CONFIG_3, 0x0C),
@@ -318,6 +320,7 @@ class TinyLoRa:
         """Sets the RFM Datarate
         :param datarate: Bandwidth and Frequency Plan
         """
+
         data_rates = {
             "SF7BW125": (0x74, 0x72, 0x04),
             "SF7BW250": (0x74, 0x82, 0x04),
@@ -327,6 +330,12 @@ class TinyLoRa:
             "SF11BW125": (0xB4, 0x72, 0x0C),
             "SF12BW125": (0xC4, 0x72, 0x0C),
         }
+
+        """
+        _bw gets assigned to _REG_MODEM_CONFIG_1
+        _sf gets assigned to _REG_MODEM_CONFIG_2 
+        _modemcfg gets assigned to _REG_MODEM_CONFIG_3 and controls AgcAutoOn and LowDataRateOptimize
+        """
         try:
             self._sf, self._bw, self._modemcfg = data_rates[datarate]
         except KeyError as err:
