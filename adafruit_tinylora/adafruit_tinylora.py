@@ -17,6 +17,8 @@ Implementation Notes
 
 * `Adafruit RFM95W LoRa Radio Transceiver Breakout <https://www.adafruit.com/product/3072>`_
 
+* `Datasheet` <https://www.hoperf.com/data/upload/portal/20190801/RFM95W-V2.0.pdf>
+
 **Software and Dependencies:**
 
 * Adafruit CircuitPython firmware for the supported boards:
@@ -35,11 +37,10 @@ __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_TinyLoRa.git"
 
 # RFM Module Settings
-_MODE_SLEEP = const(0x00)
-_MODE_LORA = const(0x80)
-_MODE_STDBY = const(0x01)
-_MODE_TX = const(0x83)
-_TRANSMIT_DIRECTION_UP = const(0x00)
+_MODE_SLEEP = const(0b0_00_0_0_000)
+_MODE_LORA = const(0b1_00_0_0_000)
+_MODE_STANDBY = const(0b0_00_0_0_001)
+_MODE_TX = const(0b1_00_0_0_011)
 # RFM Registers
 _REG_PA_CONFIG = const(0x09)
 _REG_PREAMBLE_MSB = const(0x20)
@@ -47,20 +48,21 @@ _REG_PREAMBLE_LSB = const(0x21)
 _REG_FRF_MSB = const(0x06)
 _REG_FRF_MID = const(0x07)
 _REG_FRF_LSB = const(0x08)
-_REG_FEI_LSB = const(0x1E)
-_REG_FEI_MSB = const(0x1D)
-_REG_MODEM_CONFIG = const(0x26)
+_REG_MODEM_CONFIG_2 = const(0x1E)
+_REG_MODEM_CONFIG_1 = const(0x1D)
+_REG_MODEM_CONFIG_3 = const(0x26)
 _REG_PAYLOAD_LENGTH = const(0x22)
-_REG_FIFO_POINTER = const(0x0D)
-_REG_FIFO_BASE_ADDR = const(0x80)
+_REG_FIFO_ADDRESS_POINTER = const(0x0D)
+# Reset (POR) value for _REG_FIFO_ADDRESS_POINTER
+_REG_FIFO_BASE_ADDRESS = const(0x80)
 _REG_OPERATING_MODE = const(0x01)
 _REG_VERSION = const(0x42)
-_REG_PREAMBLE_DETECT = const(0x1F)
-_REG_TIMER1_COEF = const(0x39)
-_REG_NODE_ADDR = const(0x33)
-_REG_IMAGE_CAL = const(0x3B)
-_REG_RSSI_CONFIG = const(0x0E)
-_REG_RSSI_COLLISION = const(0x0F)
+_REG_SYMBOL_TIMEOUT_LSB = const(0x1F)
+_REG_SYNC_WORD = const(0x39)
+_REG_INVERT_LORA_I_AND_Q_SIGNALS = const(0x33)
+_REG_INVERT_LORA_I_AND_Q_SIGNALS_2 = const(0x3B)
+_REG_FIFO_TX_BASE_ADDRESS = const(0x0E)
+_REG_FIFO_RX_BASE_ADDRESS = const(0x0F)
 _REG_DIO_MAPPING_1 = const(0x40)
 
 # Freq synth step
@@ -112,8 +114,8 @@ class TinyLoRa:
 
     # pylint: disable=too-many-arguments
     def __init__(self, spi, cs, irq, rst, ttn_config, channel=None):
-        """Interface for a HopeRF RFM95/6/7/8(w) radio module. Sets module up for sending to
-        The Things Network.
+        """
+        Interface for a HopeRF RFM95/6/7/8(w) radio module. Sets module up for sending to The Things Network.
 
         :param ~busio.SPI spi: The SPI bus the device is on
         :param ~digitalio.DigitalInOut cs: Chip select pin (RFM_NSS)
@@ -184,18 +186,18 @@ class TinyLoRa:
         self.frame_counter = 0
         # Set up RFM9x for LoRa Mode
         for pair in (
-            (_REG_OPERATING_MODE, _MODE_SLEEP),
-            (_REG_OPERATING_MODE, _MODE_LORA),
-            (_REG_PA_CONFIG, 0xFF),
-            (_REG_PREAMBLE_DETECT, 0x25),
-            (_REG_PREAMBLE_MSB, 0x00),
-            (_REG_PREAMBLE_LSB, 0x08),
-            (_REG_MODEM_CONFIG, 0x0C),
-            (_REG_TIMER1_COEF, 0x34),
-            (_REG_NODE_ADDR, 0x27),
-            (_REG_IMAGE_CAL, 0x1D),
-            (_REG_RSSI_CONFIG, 0x80),
-            (_REG_RSSI_COLLISION, 0x00),
+                (_REG_OPERATING_MODE, _MODE_SLEEP),
+                (_REG_OPERATING_MODE, _MODE_LORA),
+                (_REG_PA_CONFIG, 0xFF),
+                (_REG_SYMBOL_TIMEOUT_LSB, 0x25),
+                (_REG_PREAMBLE_MSB, 0x00),
+                (_REG_PREAMBLE_LSB, 0x08),
+                (_REG_MODEM_CONFIG_3, 0x0C),
+                (_REG_SYNC_WORD, 0x34),
+                (_REG_INVERT_LORA_I_AND_Q_SIGNALS, 0x27),
+                (_REG_INVERT_LORA_I_AND_Q_SIGNALS_2, 0x1D),
+                (_REG_FIFO_TX_BASE_ADDRESS, 0x80),
+                (_REG_FIFO_RX_BASE_ADDRESS, 0x00),
         ):
             self._write_u8(pair[0], pair[1])
         # Give the lora object ttn configuration
@@ -254,14 +256,14 @@ class TinyLoRa:
         # set length of LoRa packet
         lora_pkt_len = 9
         # load encrypted data into lora_pkt
-        lora_pkt[lora_pkt_len : lora_pkt_len + data_length] = enc_data[0:data_length]
+        lora_pkt[lora_pkt_len: lora_pkt_len + data_length] = enc_data[0:data_length]
         # recalculate packet length
         lora_pkt_len += data_length
         # Calculate MIC
         mic = bytearray(4)
         mic = aes.calculate_mic(lora_pkt, lora_pkt_len, mic)
         # load mic in package
-        lora_pkt[lora_pkt_len : lora_pkt_len + 4] = mic[0:4]
+        lora_pkt[lora_pkt_len: lora_pkt_len + 4] = mic[0:4]
         # recalculate packet length (add MIC length)
         lora_pkt_len += 4
         self.send_packet(lora_pkt, lora_pkt_len, timeout)
@@ -273,7 +275,7 @@ class TinyLoRa:
         :param int timeout: TxDone wait time.
         """
         # Set RFM to standby
-        self._write_u8(_MODE_STDBY, 0x81)
+        self._write_u8(_MODE_STANDBY, 0x81)
         # wait for RFM to enter standby mode
         time.sleep(0.01)
         # switch interrupt to txdone
@@ -286,14 +288,14 @@ class TinyLoRa:
             self._rfm_msb = self._frequencies[self._tx_random][0]
         # Set up frequency registers
         for pair in (
-            (_REG_FRF_MSB, self._rfm_msb),
-            (_REG_FRF_MID, self._rfm_mid),
-            (_REG_FRF_LSB, self._rfm_lsb),
-            (_REG_FEI_LSB, self._sf),
-            (_REG_FEI_MSB, self._bw),
-            (_REG_MODEM_CONFIG, self._modemcfg),
-            (_REG_PAYLOAD_LENGTH, packet_length),
-            (_REG_FIFO_POINTER, _REG_FIFO_BASE_ADDR),
+                (_REG_FRF_MSB, self._rfm_msb),
+                (_REG_FRF_MID, self._rfm_mid),
+                (_REG_FRF_LSB, self._rfm_lsb),
+                (_REG_MODEM_CONFIG_2, self._sf),
+                (_REG_MODEM_CONFIG_1, self._bw),
+                (_REG_MODEM_CONFIG_3, self._modemcfg),
+                (_REG_PAYLOAD_LENGTH, packet_length),
+                (_REG_FIFO_ADDRESS_POINTER, _REG_FIFO_BASE_ADDRESS),
         ):
             self._write_u8(pair[0], pair[1])
         # fill the FIFO buffer with the LoRa payload
