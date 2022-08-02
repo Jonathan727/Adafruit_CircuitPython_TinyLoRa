@@ -40,9 +40,15 @@ __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_TinyLoRa.git"
 US_PREAMBLE_SYNC_WORD = 0x34
 _MODE_SLEEP = const(0b0_00_0_0_000)
 _MODE_LORA = const(0b1_00_0_0_000)
+_MODE_LORA_SLEEP = const(0b1_00_0_0_000)
 _MODE_STANDBY = const(0b0_00_0_0_001)
 _MODE_LORA_STANDBY = const(0b1_00_0_0_001)
 _MODE_TX = const(0b1_00_0_0_011)
+_MODE_FSK_FS_RX = const(0b0_00_0_0_100)
+_FSK_IMAGE_CALIBRATION_START = const(1 < 6)
+_FSK_IMAGE_CALIBRATION_TEMP_MONITOR_MASK = const(0xFE)
+_FSK_IMAGE_CALIBRATION_TEMP_MONITOR_OFF_ON = const(0x00)
+_FSK_IMAGE_CALIBRATION_TEMP_MONITOR_OFF_OFF = const(0x01)
 # RFM Registers
 _REG_PA_CONFIG = const(0x09)
 _REG_PREAMBLE_MSB = const(0x20)
@@ -60,9 +66,11 @@ _REG_FIFO_BASE_ADDRESS = const(0x80)
 _REG_OPERATING_MODE = const(0x01)
 _REG_VERSION = const(0x42)
 _REG_SYMBOL_TIMEOUT_LSB = const(0x1F)
+_REG_TEMPERATURE = const(0x3C)
 _REG_SYNC_WORD = const(0x39)
 _REG_INVERT_LORA_I_AND_Q_SIGNALS = const(0x33)
 _REG_INVERT_LORA_I_AND_Q_SIGNALS_2 = const(0x3B)
+_REG_FSK_IMAGE_CALIBRATION = _REG_INVERT_LORA_I_AND_Q_SIGNALS_2
 _REG_FIFO_TX_BASE_ADDRESS = const(0x0E)
 _REG_FIFO_RX_BASE_ADDRESS = const(0x0F)
 _REG_DIO_MAPPING_1 = const(0x40)
@@ -189,7 +197,7 @@ class TinyLoRa:
         # Set up RFM9x for LoRa Mode
         for pair in (
                 (_REG_OPERATING_MODE, _MODE_SLEEP),
-                (_REG_OPERATING_MODE, _MODE_LORA),
+                (_REG_OPERATING_MODE, _MODE_LORA_SLEEP),
                 #     Max Power
                 (_REG_PA_CONFIG, 0xFF),
                 (_REG_SYMBOL_TIMEOUT_LSB, 0x25),
@@ -349,6 +357,53 @@ class TinyLoRa:
         :param int channel: Transmit Channel (0 through 7).
         """
         self._rfm_msb, self._rfm_mid, self._rfm_lsb = self._frequencies[channel]
+
+    def get_temperature(self, correctionFactor=0):
+        previous_operating_mode = self._read_u8(_REG_OPERATING_MODE)
+
+        # Pass through LoRa sleep only necessary if reading temperature while in LoRa Mode
+        if (previous_operating_mode & _MODE_LORA) == _MODE_LORA:
+            # switch RFM to sleep to change operating mode
+            self._write_u8(_REG_OPERATING_MODE, _MODE_SLEEP)
+
+        # Put device in FSK Standby Sleep
+        self._write_u8(_REG_OPERATING_MODE, _MODE_SLEEP)
+        # Put device in FSK Standby Mode
+        self._write_u8(_REG_OPERATING_MODE, _MODE_STANDBY)
+        # Put device in FSK RxSynth
+        self._write_u8(_REG_OPERATING_MODE, _MODE_FSK_FS_RX)
+
+        # Enable Temperature Reading
+        previous_image_calibration = self._read_u8(_REG_FSK_IMAGE_CALIBRATION)
+        self._write_u8(_REG_FSK_IMAGE_CALIBRATION, (
+                previous_image_calibration & _FSK_IMAGE_CALIBRATION_TEMP_MONITOR_MASK) | _FSK_IMAGE_CALIBRATION_TEMP_MONITOR_OFF_ON)
+
+        time.sleep(0.000150)  # 150μs
+
+        # Disable Temperature Reading
+        self._write_u8(_REG_FSK_IMAGE_CALIBRATION, (
+                previous_image_calibration & _FSK_IMAGE_CALIBRATION_TEMP_MONITOR_MASK) | _FSK_IMAGE_CALIBRATION_TEMP_MONITOR_OFF_OFF)
+
+        # Put device in FSK Sleep Mode
+        self._write_u8(_REG_OPERATING_MODE, _MODE_SLEEP)
+
+        # Read Temperature
+        temp = self._read_u8(_REG_TEMPERATURE)
+
+        if (temp & 0x80) == 0x80:
+            temp = 255 - temp
+        else:
+            temp *= -1
+
+        # Switch back to LoRa Mode if that is how we started
+        if (previous_operating_mode & _MODE_LORA) == _MODE_LORA:
+            # switch RFM to sleep to change operating mode
+            self._write_u8(_REG_OPERATING_MODE, _MODE_LORA_SLEEP)
+
+        # Return to previous Mode
+        self._write_u8(_REG_OPERATING_MODE, previous_operating_mode)
+
+        return temp + correctionFactor
 
     def _read_into(self, address, buf, length=None):
         """Read a number of bytes from the specified address into the
